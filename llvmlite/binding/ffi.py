@@ -1,6 +1,6 @@
 import ctypes
-import os
 import threading
+import importlib.resources
 
 from llvmlite.binding.common import _decode_string, _is_shutting_down
 from llvmlite.utils import get_library_name
@@ -151,43 +151,17 @@ class _lib_fn_wrapper(object):
             return self._cfn(*args, **kwargs)
 
 
-_lib_dir = os.path.dirname(__file__)
-
-if os.name == 'nt':
-    # Append DLL directory to PATH, to allow loading of bundled CRT libraries
-    # (Windows uses PATH for DLL loading, see http://msdn.microsoft.com/en-us/library/7d83bc18.aspx).  # noqa E501
-    os.environ['PATH'] += ';' + _lib_dir
-
-
 _lib_name = get_library_name()
 
 
-# Possible CDLL loading paths
-_lib_paths = [
-    os.path.join(_lib_dir, _lib_name),  # Absolute
-    _lib_name,  # In PATH
-    os.path.join('.', _lib_name),  # Current directory
-]
-
-# use importlib.resources, path returns an context manager, in order to make sure that the file remains available, we keep the context manager alive...
-import importlib.resources
-__handle_of_resource_path = importlib.resources.path(__name__, _lib_name)
-_lib_paths.append(resource_filename(next(__handle_of_resource_path))
-
-
-# Try to load from all of the different paths
-errors = []
-for _lib_path in _lib_paths:
-    try:
-        lib = ctypes.CDLL(_lib_path)
-    except OSError as e:
-        errors.append(e)
-        continue
-    else:
-        break
-else:
-    msg = ("Could not load shared object file: {}\n".format(_lib_name) +
-           "Errors were: {}".format(errors))
+pkgname = ".".join(__name__.split(".")[0:-1])
+try:
+    with importlib.resources.path(pkgname, _lib_name) as path:
+        lib = ctypes.CDLL(str(path))
+        # outside this context manager the lib may not exist
+except OSError as e:
+    msg = f"""Could not find/load shared object file: {_lib_name}
+ Error was: {e}"""
     raise OSError(msg)
 
 
